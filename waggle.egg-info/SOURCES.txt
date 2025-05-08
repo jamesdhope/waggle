@@ -1,8 +1,10 @@
 LICENSE
 README.md
 setup.py
+waggle/__init__.py
 waggle.egg-info/PKG-INFO
 waggle.egg-info/SOURCES.txt
 waggle.egg-info/dependency_links.txt
 waggle.egg-info/requires.txt
 waggle.egg-info/top_level.txt
+waggle/waggle/__init__.py

@@ -3,10 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from typing import Callable, Any, Optional, Dict
-from collections.abc import AsyncGenerator
-from acp_sdk.models import Message
-from acp_sdk.server import Context, RunYield, RunYieldResume
+from typing import Callable, Any, Optional, Dict, List, AsyncGenerator
 
 class DQN(nn.Module):
     def __init__(self, state_dim: int, action_dim: int):
@@ -93,7 +90,7 @@ def waggle(
     epsilon: float = 0.1
 ):
     """
-    Decorator to add reinforcement learning capabilities to a Bee AI agent.
+    Decorator to add reinforcement learning capabilities to an agent.
     
     Args:
         reward_function: Function that computes the reward given state, action, and next_state
@@ -114,13 +111,10 @@ def waggle(
         )
         
         @functools.wraps(func)
-        async def wrapper(
-            input: list[Message],
-            context: Context
-        ) -> AsyncGenerator[RunYield, RunYieldResume]:
+        async def wrapper(messages: List[Any]) -> AsyncGenerator[Dict[str, Any], None]:
             state = np.zeros(state_dim)  # Initial state
             
-            async for yield_value in func(input, context):
+            async for yield_value in func(messages):
                 if isinstance(yield_value, dict) and "thought" in yield_value:
                     # This is a thought, use it to update state
                     state = np.array([ord(c) for c in yield_value["thought"]])[:state_dim]
