@@ -1,0 +1,4 @@
+waggle>=0.1.0
+acp-sdk>=0.8.1
+numpy>=1.21.0
+torch>=1.9.0 
