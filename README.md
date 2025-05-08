@@ -1,10 +1,53 @@
-# Waggle Example Agent Implementation
+# Waggle
 
-This repository contains an example implementation of a multi-agent system using the Waggle library, demonstrating how reward functions can be used to create natural interaction patterns between agents.
+A reinforcement learning extension for IBM Bee AI Agents that allows you to add reward-based learning to your agents.
 
-## Overview
+## Installation
 
-The example implements three distinct agents with different roles and reward functions:
+```bash
+pip install waggle
+```
+
+## Quick Start
+
+```python
+from waggle import waggle
+
+@waggle(
+    reward_function=lambda state, action, next_state: 1.0,  # Your custom reward function
+    state_dim=10,  # Dimension of your state space
+    action_dim=5,  # Dimension of your action space
+)
+async def my_agent(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
+    """Your agent with reinforcement learning capabilities"""
+    for message in messages:
+        # Your agent logic here
+        yield response
+```
+
+## Features
+
+- Customizable reward functions for agent behavior
+- Reinforcement learning capabilities
+- Asynchronous support
+- Persistent learning across agent calls
+- Dynamic decision making based on rewards
+
+## Customizing Rewards
+
+You can define your own reward function that takes the current state, action, and next state as parameters:
+
+```python
+def my_reward_function(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
+    # Your reward logic here
+    return reward_value
+
+@waggle(reward_function=my_reward_function)
+```
+
+## Example Implementation
+
+The `example_agent` directory contains a demonstration of how to use Waggle to create a multi-agent system with natural interaction patterns. The example implements three distinct agents with different roles and reward functions:
 
 1. **Product Provider Agent (Agent1)**
    - Focus: Product features and capabilities
@@ -29,11 +72,9 @@ The example implements three distinct agents with different roles and reward fun
      - Equal reward for any interaction (+0.2)
      - Rewards for gathering information (+0.2 per term)
 
-## Implementation Details
+### Example Implementation Details
 
-### Reward-Based Decision Making
-
-The agents use their reward functions to make decisions about who to interact with:
+The example demonstrates how to use reward functions to create natural interaction patterns:
 
 ```python
 # Calculate potential rewards for different responses
@@ -55,26 +96,7 @@ for target, next_state in next_states.items():
 target = max(rewards.items(), key=lambda x: x[1])[0]
 ```
 
-### Key Findings
-
-1. **Natural Interaction Patterns**
-   - Agent1 and Agent2 naturally form a collaborative relationship due to their mutually beneficial reward functions
-   - Agent3 maintains a more neutral stance but focuses on information gathering
-   - Interaction patterns emerge from the reward functions rather than being hardcoded
-
-2. **Dynamic Decision Making**
-   - Agents actively evaluate potential interactions based on their reward functions
-   - Decisions about who to interact with are made in real-time
-   - The system demonstrates emergent behavior through reward-based learning
-
-3. **Effective Information Control**
-   - Product and Service providers naturally limit information sharing with the Information Harvester
-   - The Information Harvester adapts its approach based on the responses it receives
-   - The system maintains professional boundaries while allowing for natural conversation flow
-
-## Usage
-
-To run the example:
+### Running the Example
 
 1. Set up the environment:
 ```bash
@@ -93,7 +115,7 @@ OPENAI_API_KEY=your_api_key_here
 python3 example_agent/agent_interaction_example.py
 ```
 
-## Requirements
+### Example Requirements
 
 - Python 3.8+
 - OpenAI API key
@@ -118,3 +140,7 @@ python3 example_agent/agent_interaction_example.py
    - Implement experience replay
    - Add more sophisticated action selection
    - Improve state-action value estimation
+
+## License
+
+MIT License
