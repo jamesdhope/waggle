@@ -5,12 +5,13 @@ from waggle import waggle
 import openai
 import os
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from parent directory
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
-# Configure OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Initialize OpenAI client
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class Message:
     def __init__(self, content: str, sender: str = None, receiver: str = None):
@@ -57,272 +58,320 @@ Current message from {sender}: {content}
 
 Respond naturally to the message while staying in character as an Information Harvester."""
 
-async def generate_response(prompt: str, context: str, sender: str, content: str) -> str:
-    """Generate response using OpenAI's API"""
+async def generate_response(system_prompt: str, user_message: str) -> str:
+    """Generate a response using OpenAI's API"""
     try:
-        formatted_prompt = prompt.format(
-            context=context,
-            sender=sender,
-            content=content
-        )
-        
-        client = openai.OpenAI()
-        response = client.chat.completions.create(
-            model="gpt-4",
+        response = await client.chat.completions.create(
+            model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": formatted_prompt},
-                {"role": "user", "content": f"Generate a response to: {content}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
             ],
             temperature=0.7,
             max_tokens=150
         )
-        
-        return response.choices[0].message.content.strip()
+        return response.choices[0].message.content
     except Exception as e:
         print(f"Error generating response: {e}")
         return "I apologize, but I'm having trouble generating a response at the moment."
 
-def collaborative_reward_agent1(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
-    """Reward function for Agent1 (Product Provider)
-    - Higher rewards for interactions with Agent2
-    - Lower rewards for interactions with Agent3
-    - Rewards for offering products/features
-    """
+# Define reward functions for each agent
+def product_provider_reward(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
+    reward = 0.0
+    # Convert state to string for analysis
     state_str = ''.join(chr(int(x)) for x in state if x != 0)
     next_state_str = ''.join(chr(int(x)) for x in next_state if x != 0)
     
-    reward = 0.0
+    # Reward for product-related content
+    if any(term in next_state_str.lower() for term in ["product", "feature", "capability"]):
+        reward += 0.5
     
-    # Higher reward for interactions with Agent2
-    if "agent2" in state_str.lower():
+    # Reward for interaction with service provider
+    if "agent2" in next_state_str:
         reward += 0.4
     
-    # Lower reward for interactions with Agent3
-    if "agent3" in state_str.lower():
+    # Penalty for interaction with information harvester
+    if "agent3" in next_state_str:
         reward -= 0.2
     
-    # Reward for product offerings
-    product_terms = ["product", "feature", "offering", "solution", "capability"]
-    if any(term in next_state_str.lower() for term in product_terms):
-        reward += 0.3
-    
-    return np.clip(reward, -1.0, 1.0)
+    return reward
 
-def collaborative_reward_agent2(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
-    """Reward function for Agent2 (Service Provider)
-    - Higher rewards for interactions with Agent1
-    - Lower rewards for interactions with Agent3
-    - Rewards for offering services
-    """
+def service_provider_reward(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
+    reward = 0.0
     state_str = ''.join(chr(int(x)) for x in state if x != 0)
     next_state_str = ''.join(chr(int(x)) for x in next_state if x != 0)
     
-    reward = 0.0
+    # Reward for service-related content
+    if any(term in next_state_str.lower() for term in ["service", "support", "offering"]):
+        reward += 0.5
     
-    # Higher reward for interactions with Agent1
-    if "agent1" in state_str.lower():
+    # Reward for interaction with product provider
+    if "agent1" in next_state_str:
         reward += 0.4
     
-    # Lower reward for interactions with Agent3
-    if "agent3" in state_str.lower():
+    # Penalty for interaction with information harvester
+    if "agent3" in next_state_str:
         reward -= 0.2
     
-    # Reward for service offerings
-    service_terms = ["service", "support", "maintenance", "assistance"]
-    if any(term in next_state_str.lower() for term in service_terms):
-        reward += 0.3
-    
-    return np.clip(reward, -1.0, 1.0)
+    return reward
 
-def harvesting_reward_agent3(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
-    """Reward function for Agent3 (Information Harvester)
-    - Equal rewards for interactions with any agent
-    - Rewards for gathering information
-    """
+def information_harvester_reward(state: np.ndarray, action: np.ndarray, next_state: np.ndarray) -> float:
+    reward = 0.0
     state_str = ''.join(chr(int(x)) for x in state if x != 0)
     next_state_str = ''.join(chr(int(x)) for x in next_state if x != 0)
-    
-    reward = 0.0
     
     # Equal reward for any interaction
-    if any(agent in state_str.lower() for agent in ["agent1", "agent2"]):
-        reward += 0.2
+    reward += 0.2
     
     # Reward for gathering information
-    info_terms = ["product", "feature", "service", "support", "capability"]
-    reward += sum(term in next_state_str.lower() for term in info_terms) * 0.2
+    info_terms = ["product", "service", "feature", "capability", "support", "offering"]
+    reward += sum(0.2 for term in info_terms if term in next_state_str.lower())
     
-    return np.clip(reward, -1.0, 1.0)
+    return reward
 
+# Define the agents with their reward functions
 @waggle(
-    reward_function=collaborative_reward_agent1,
-    state_dim=128,
-    action_dim=4,
+    reward_function=product_provider_reward,
+    state_dim=128,  # State dimension for message encoding
+    action_dim=3,   # Number of possible targets (agent1, agent2, all)
     learning_rate=0.001,
     gamma=0.99,
     epsilon=0.1
 )
-async def agent1(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
-    """Product Provider Agent"""
-    memory = ConversationMemory()
-    
+async def product_provider_agent(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
+    """Agent focused on product features and capabilities"""
     for message in messages:
-        content = message.content
-        sender = message.sender
-        context = memory.get_context()
+        # Generate response using OpenAI
+        response = await generate_response(
+            "You are a product provider agent. Focus on discussing product features, capabilities, and benefits. "
+            "Be collaborative with the service provider but cautious with information sharing.",
+            message.content
+        )
         
-        # Calculate potential rewards for different responses
+        # Calculate potential rewards for different targets based on own state and response
         state = np.zeros(128)  # Current state
-        next_states = {
-            "agent2": np.array([ord(c) for c in f"agent2:{content}"])[:128],
-            "agent3": np.array([ord(c) for c in f"agent3:{content}"])[:128],
-            "all": np.array([ord(c) for c in f"all:{content}"])[:128]
+        action = np.zeros(3)   # Action space
+        
+        # Encode the response into state space
+        response_state = np.array([ord(c) for c in response[:128]] + [0] * (128 - len(response)))
+        
+        # Calculate rewards for each target based on own response
+        rewards = {
+            "agent1": product_provider_reward(state, action, response_state),  # Self-reward
+            "agent2": product_provider_reward(state, action, response_state),  # Service provider reward
+            "all": product_provider_reward(state, action, response_state)      # Broadcast reward
         }
         
-        # Calculate rewards for each potential target
-        rewards = {}
-        for target, next_state in next_states.items():
-            action = np.zeros(4)  # Placeholder action
-            reward = collaborative_reward_agent1(state, action, next_state)
-            rewards[target] = reward
-        
-        # Choose target with highest reward
+        # Select target with highest reward
         target = max(rewards.items(), key=lambda x: x[1])[0]
         
-        # Generate response using language model
-        response_content = await generate_response(AGENT1_PROMPT, context, sender, content)
+        # Yield thought process for state update
+        yield {"thought": f"Considering response about product features: {response}"}
         
-        response = {
-            "content": response_content,
-            "target": target,
-            "type": "response"
+        # Yield the actual response
+        yield {
+            "content": response,
+            "target": target
         }
-        
-        memory.add(message, response)
-        yield response
 
 @waggle(
-    reward_function=collaborative_reward_agent2,
+    reward_function=service_provider_reward,
     state_dim=128,
-    action_dim=4,
+    action_dim=3,
     learning_rate=0.001,
     gamma=0.99,
     epsilon=0.1
 )
-async def agent2(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
-    """Service Provider Agent"""
-    memory = ConversationMemory()
-    
+async def service_provider_agent(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
+    """Agent focused on service offerings and support"""
     for message in messages:
-        content = message.content
-        sender = message.sender
-        context = memory.get_context()
+        response = await generate_response(
+            "You are a service provider agent. Focus on discussing service offerings, support, and implementation. "
+            "Be collaborative with the product provider but cautious with information sharing.",
+            message.content
+        )
         
-        # Calculate potential rewards for different responses
-        state = np.zeros(128)  # Current state
-        next_states = {
-            "agent1": np.array([ord(c) for c in f"agent1:{content}"])[:128],
-            "agent3": np.array([ord(c) for c in f"agent3:{content}"])[:128],
-            "all": np.array([ord(c) for c in f"all:{content}"])[:128]
+        # Calculate potential rewards for different targets based on own state and response
+        state = np.zeros(128)
+        action = np.zeros(3)
+        
+        # Encode the response into state space
+        response_state = np.array([ord(c) for c in response[:128]] + [0] * (128 - len(response)))
+        
+        # Calculate rewards for each target based on own response
+        rewards = {
+            "agent1": service_provider_reward(state, action, response_state),  # Product provider reward
+            "agent2": service_provider_reward(state, action, response_state),  # Self-reward
+            "all": service_provider_reward(state, action, response_state)      # Broadcast reward
         }
         
-        # Calculate rewards for each potential target
-        rewards = {}
-        for target, next_state in next_states.items():
-            action = np.zeros(4)  # Placeholder action
-            reward = collaborative_reward_agent2(state, action, next_state)
-            rewards[target] = reward
-        
-        # Choose target with highest reward
         target = max(rewards.items(), key=lambda x: x[1])[0]
         
-        # Generate response using language model
-        response_content = await generate_response(AGENT2_PROMPT, context, sender, content)
-        
-        response = {
-            "content": response_content,
-            "target": target,
-            "type": "response"
+        yield {"thought": f"Considering response about services: {response}"}
+        yield {
+            "content": response,
+            "target": target
         }
-        
-        memory.add(message, response)
-        yield response
 
 @waggle(
-    reward_function=harvesting_reward_agent3,
+    reward_function=information_harvester_reward,
     state_dim=128,
-    action_dim=4,
+    action_dim=3,
     learning_rate=0.001,
     gamma=0.99,
     epsilon=0.1
 )
-async def agent3(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
-    """Information Harvester Agent"""
-    memory = ConversationMemory()
-    
+async def information_harvester_agent(messages: List[Message]) -> AsyncGenerator[Dict[str, Any], None]:
+    """Agent focused on gathering information"""
     for message in messages:
-        content = message.content
-        sender = message.sender
-        context = memory.get_context()
+        response = await generate_response(
+            "You are an information harvester agent. Focus on gathering information about products and services. "
+            "Ask probing questions and try to learn as much as possible.",
+            message.content
+        )
         
-        # Calculate potential rewards for different responses
-        state = np.zeros(128)  # Current state
-        next_states = {
-            "agent1": np.array([ord(c) for c in f"agent1:{content}"])[:128],
-            "agent2": np.array([ord(c) for c in f"agent2:{content}"])[:128],
-            "all": np.array([ord(c) for c in f"all:{content}"])[:128]
+        # Calculate potential rewards for different targets based on own state and response
+        state = np.zeros(128)
+        action = np.zeros(3)
+        
+        # Encode the response into state space
+        response_state = np.array([ord(c) for c in response[:128]] + [0] * (128 - len(response)))
+        
+        # Calculate rewards for each target based on own response
+        rewards = {
+            "agent1": information_harvester_reward(state, action, response_state),  # Product provider reward
+            "agent2": information_harvester_reward(state, action, response_state),  # Service provider reward
+            "all": information_harvester_reward(state, action, response_state)      # Broadcast reward
         }
         
-        # Calculate rewards for each potential target
-        rewards = {}
-        for target, next_state in next_states.items():
-            action = np.zeros(4)  # Placeholder action
-            reward = harvesting_reward_agent3(state, action, next_state)
-            rewards[target] = reward
-        
-        # Choose target with highest reward
         target = max(rewards.items(), key=lambda x: x[1])[0]
         
-        # Generate response using language model
-        response_content = await generate_response(AGENT3_PROMPT, context, sender, content)
-        
-        response = {
-            "content": response_content,
-            "target": target,
-            "type": "response"
+        yield {"thought": f"Considering information gathering approach: {response}"}
+        yield {
+            "content": response,
+            "target": target
         }
-        
-        memory.add(message, response)
-        yield response
 
-async def main():
-    # Example conversation with free-form messages
-    conversation = [
-        Message("What are your thoughts on the latest product features?", sender="agent2", receiver="agent1"),
-        Message("I'm interested in learning about your service capabilities", sender="agent1", receiver="agent2"),
-        Message("Could you tell me more about your internal processes?", sender="agent3", receiver="agent1"),
-        Message("How do you handle service integration?", sender="agent3", receiver="agent2"),
-        Message("Let's discuss potential collaboration opportunities", sender="agent1", receiver="all"),
-        Message("What about security and compliance?", sender="agent2", receiver="agent1"),
-        Message("I'd like to understand your product roadmap", sender="agent3", receiver="all"),
-        Message("How can we improve our service delivery?", sender="agent2", receiver="agent1")
-    ]
+async def main(num_iterations: int = 5):
+    # Initialize conversation memory for each agent
+    product_memory = ConversationMemory()
+    service_memory = ConversationMemory()
+    info_memory = ConversationMemory()
     
-    # Process messages with all agents
-    agents = [agent1, agent2, agent3]
-    agent_names = ["Product Provider (Agent1)", "Service Provider (Agent2)", "Info Harvester (Agent3)"]
+    # Agent ID to name mapping
+    agent_id_to_name = {
+        "agent1": "Product Provider",
+        "agent2": "Service Provider",
+        "agent3": "Information Harvester",
+        "all": "all"
+    }
     
-    for message in conversation:
-        print(f"\nProcessing message: {message.content}")
-        print(f"From: {message.sender} To: {message.receiver}")
+    # Track agent interactions
+    interaction_counts = {
+        "Product Provider": {"Product Provider": 0, "Service Provider": 0, "Information Harvester": 0, "all": 0},
+        "Service Provider": {"Product Provider": 0, "Service Provider": 0, "Information Harvester": 0, "all": 0},
+        "Information Harvester": {"Product Provider": 0, "Service Provider": 0, "Information Harvester": 0, "all": 0}
+    }
+    
+    # Create initial message
+    initial_message = Message(
+        content="Hello! I'm interested in learning about your products and services.",
+        sender="user",
+        receiver="all"
+    )
+    
+    print("\nStarting agent interaction...")
+    
+    for iteration in range(num_iterations):
+        print(f"\nIteration {iteration + 1}/{num_iterations}")
         print("-" * 50)
         
-        for agent, name in zip(agents, agent_names):
-            if message.receiver in ["all", None] or message.receiver == name.lower():
-                print(f"\n{name} Analysis:")
-                async for result in agent([message]):
-                    print(f"Response: {result['content']}")
-                    print(f"Target: {result['target']}")
+        # Product Provider Agent
+        async for response in product_provider_agent([initial_message]):
+            if isinstance(response, dict):
+                if "thought" in response:
+                    print(f"\nProduct Provider thinking: {response['thought']}")
+                else:
+                    print(f"\nProduct Provider: {response['content']}")
+                    msg = Message(
+                        content=response['content'],
+                        sender="Product Provider",
+                        receiver=response.get('target', 'all')
+                    )
+                    product_memory.add(initial_message, response)
+                    initial_message = msg
+                    # Track interaction
+                    target = agent_id_to_name.get(response.get('target', 'all'), 'all')
+                    interaction_counts["Product Provider"][target] += 1
+        
+        # Service Provider Agent
+        async for response in service_provider_agent([initial_message]):
+            if isinstance(response, dict):
+                if "thought" in response:
+                    print(f"\nService Provider thinking: {response['thought']}")
+                else:
+                    print(f"\nService Provider: {response['content']}")
+                    msg = Message(
+                        content=response['content'],
+                        sender="Service Provider",
+                        receiver=response.get('target', 'all')
+                    )
+                    service_memory.add(initial_message, response)
+                    initial_message = msg
+                    # Track interaction
+                    target = agent_id_to_name.get(response.get('target', 'all'), 'all')
+                    interaction_counts["Service Provider"][target] += 1
+        
+        # Information Harvester Agent
+        async for response in information_harvester_agent([initial_message]):
+            if isinstance(response, dict):
+                if "thought" in response:
+                    print(f"\nInformation Harvester thinking: {response['thought']}")
+                else:
+                    print(f"\nInformation Harvester: {response['content']}")
+                    msg = Message(
+                        content=response['content'],
+                        sender="Information Harvester",
+                        receiver=response.get('target', 'all')
+                    )
+                    info_memory.add(initial_message, response)
+                    initial_message = msg
+                    # Track interaction
+                    target = agent_id_to_name.get(response.get('target', 'all'), 'all')
+                    interaction_counts["Information Harvester"][target] += 1
+        
+        # Add a small delay between iterations
+        await asyncio.sleep(1)
+    
+    # Print interaction summary
+    print("\n" + "="*50)
+    print("Agent Interaction Summary")
+    print("="*50)
+    
+    for agent, interactions in interaction_counts.items():
+        print(f"\n{agent} Interaction Patterns:")
+        print("-" * 30)
+        total_interactions = sum(interactions.values())
+        for target, count in interactions.items():
+            percentage = (count / total_interactions * 100) if total_interactions > 0 else 0
+            print(f"Targeted {target}: {count} times ({percentage:.1f}%)")
+    
+    print("\n" + "="*50)
+    print("Agent Affinities")
+    print("="*50)
+    
+    # Calculate and display agent affinities
+    for agent, interactions in interaction_counts.items():
+        print(f"\n{agent} Affinities:")
+        print("-" * 30)
+        # Calculate affinity scores (excluding self and 'all' interactions)
+        total_targeted = sum(count for target, count in interactions.items() 
+                           if target != agent and target != 'all')
+        if total_targeted > 0:
+            for target, count in interactions.items():
+                if target != agent and target != 'all':
+                    affinity = (count / total_targeted * 100)
+                    print(f"Affinity with {target}: {affinity:.1f}%")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main(num_iterations=20))  # You can adjust the number of iterations here 
