@@ -1,6 +1,6 @@
 # Waggle
 
-A reinforcement learning extension for IBM Bee AI Agents that allows you to add reward-based learning to your agents.
+A reinforcement learning extension for Generic AI Agents that allows you to add reward-based learning to your agents.
 
 ## Installation
 
